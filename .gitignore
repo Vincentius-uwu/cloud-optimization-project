@@ -1,0 +1,3 @@
+bin/
+results/*.out
+results/*.err
