@@ -1,0 +1,13 @@
+task_id,workload,size,runtime_s
+T1,matrix_task,800,0.5166
+T2,cpu_task,6000000,0.9617
+T3,sort_task,15000000,1.5277
+T4,memory_task,512,0.6018
+T5,matrix_task,1400,3.2426
+T6,cpu_task,2000000,0.2049
+T7,sort_task,10000000,0.9907
+T8,memory_task,1536,1.7249
+T9,matrix_task,1000,1.0340
+T10,cpu_task,1500000,0.1440
+T11,sort_task,30000000,3.2097
+T12,memory_task,1024,1.2526

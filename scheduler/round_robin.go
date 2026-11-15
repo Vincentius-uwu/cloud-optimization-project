@@ -2,10 +2,14 @@ package main
 
 import (
 	"encoding/csv"
+	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func readCSV(path string, expectedHeader []string) ([][]string, error) {
@@ -15,8 +19,7 @@ func readCSV(path string, expectedHeader []string) ([][]string, error) {
 	}
 	defer file.Close()
 
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
+	records, err := csv.NewReader(file).ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
@@ -32,6 +35,50 @@ func readCSV(path string, expectedHeader []string) ([][]string, error) {
 		}
 	}
 	return records[1:], nil
+}
+
+// accepts both TD4 tasks.csv (3 cols) and tasks_profiled.csv (4 cols)
+func readTasks(path string) (tasks [][]string, durations []float64, hasDur bool, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer file.Close()
+
+	records, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(records) == 0 {
+		return nil, nil, false, fmt.Errorf("%s is empty", path)
+	}
+
+	hdr := records[0]
+	isBase := len(hdr) == 3 &&
+		strings.TrimSpace(hdr[0]) == "task_id" &&
+		strings.TrimSpace(hdr[1]) == "workload" &&
+		strings.TrimSpace(hdr[2]) == "size"
+	isProfiled := len(hdr) == 4 &&
+		strings.TrimSpace(hdr[0]) == "task_id" &&
+		strings.TrimSpace(hdr[1]) == "workload" &&
+		strings.TrimSpace(hdr[2]) == "size" &&
+		strings.TrimSpace(hdr[3]) == "est_runtime_s"
+	if !isBase && !isProfiled {
+		return nil, nil, false, fmt.Errorf("%s: invalid header", path)
+	}
+
+	if isProfiled {
+		durations = make([]float64, len(records)-1)
+		for i, row := range records[1:] {
+			d, parseErr := strconv.ParseFloat(strings.TrimSpace(row[3]), 64)
+			if parseErr != nil || d < 0 || math.IsNaN(d) || math.IsInf(d, 0) {
+				return nil, nil, false, fmt.Errorf("%s row %d: invalid est_runtime_s %q", path, i+2, row[3])
+			}
+			durations[i] = d
+		}
+		hasDur = true
+	}
+	return records[1:], durations, hasDur, nil
 }
 
 func schedule(tasks [][]string, machines [][]string) ([][]string, error) {
@@ -104,11 +151,63 @@ func writeAllocation(path string, allocations [][]string) error {
 	return nil
 }
 
-func run(args []string) error {
-	if len(args) != 3 {
-		return fmt.Errorf("usage: round_robin_scheduler <tasks.csv> <machines.csv> <allocation.csv>")
+func exportCSV(path, algo, dataset string, solveMs, predMakespan float64, hasDur bool, vmLoads []float64) error {
+	if path == "" {
+		return nil
 	}
-	tasks, err := readCSV(args[0], []string{"task_id", "workload", "size"})
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	needHeader := err != nil || info.Size() == 0
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	w := csv.NewWriter(f)
+	if needHeader {
+		if err := w.Write([]string{"algorithm", "dataset", "run", "scheduler_time_ms", "predicted_makespan_s", "actual_makespan_s", "vm1_s", "vm2_s", "vm3_s"}); err != nil {
+			return err
+		}
+	}
+
+	fmtLoad := func(idx int) string {
+		if !hasDur || idx >= len(vmLoads) {
+			return ""
+		}
+		return fmt.Sprintf("%.4f", vmLoads[idx])
+	}
+	predStr := ""
+	if hasDur {
+		predStr = fmt.Sprintf("%.4f", predMakespan)
+	}
+
+	row := []string{
+		algo,
+		dataset,
+		"1",
+		fmt.Sprintf("%.3f", solveMs),
+		predStr,
+		"", // filled after GCP run
+		fmtLoad(0),
+		fmtLoad(1),
+		fmtLoad(2),
+	}
+	if err := w.Write(row); err != nil {
+		return err
+	}
+	w.Flush()
+	return w.Error()
+}
+
+func run(args []string, exportPath string) error {
+	if len(args) != 3 {
+		return fmt.Errorf("usage: round_robin_scheduler [--export file.csv] <tasks.csv> <machines.csv> <allocation.csv>")
+	}
+	tasks, durations, hasDur, err := readTasks(args[0])
 	if err != nil {
 		return err
 	}
@@ -116,19 +215,49 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	start := time.Now()
 	assignments, err := schedule(tasks, machines)
+	elapsedMs := float64(time.Since(start).Nanoseconds()) / 1e6
 	if err != nil {
 		return err
 	}
 	if err := writeAllocation(args[2], assignments); err != nil {
 		return err
 	}
-	fmt.Printf("Scheduled %d tasks across %d VMs: %s\n", len(tasks), len(machines), args[2])
+
+	vmLoads := make([]float64, len(machines))
+	predMakespan := 0.0
+	if hasDur {
+		for i, d := range durations {
+			vmLoads[i%len(machines)] += d
+		}
+		for _, l := range vmLoads {
+			if l > predMakespan {
+				predMakespan = l
+			}
+		}
+	}
+
+	if err := exportCSV(exportPath, "round_robin", filepath.Base(args[0]), elapsedMs, predMakespan, hasDur, vmLoads); err != nil {
+		return err
+	}
+
+	if hasDur {
+		fmt.Printf("Algorithm: round_robin | Predicted makespan: %.4fs | Solve time: %.3f ms\n", predMakespan, elapsedMs)
+		for i, row := range machines {
+			fmt.Printf("  %s predicted load: %.4fs\n", strings.TrimSpace(row[0]), vmLoads[i])
+		}
+	} else {
+		fmt.Printf("Scheduled %d tasks across %d VMs: %s (%.3f ms)\n", len(tasks), len(machines), args[2], elapsedMs)
+	}
 	return nil
 }
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	exportPath := flag.String("export", "", "append metrics to CSV")
+	flag.Parse()
+	if err := run(flag.Args(), *exportPath); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
