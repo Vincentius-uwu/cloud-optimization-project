@@ -61,7 +61,6 @@ type Machine struct {
 }
 
 func run() error {
-	start := time.Now()
 	args := os.Args[1:]
 	exportPath := ""
 
@@ -100,10 +99,6 @@ func run() error {
 		tasks = append(tasks, t)
 	}
 
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].EstTime > tasks[j].EstTime
-	})
-
 	machineRecords, err := readCSVRaw(machinesPath)
 	if err != nil || len(machineRecords) < 2 {
 		return fmt.Errorf("error reading machines: %v", err)
@@ -120,6 +115,11 @@ func run() error {
 		return fmt.Errorf("no VMs found")
 	}
 
+	start := time.Now()
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].EstTime > tasks[j].EstTime
+	})
+
 	var assignments [][]string
 	for _, t := range tasks {
 		minIdx := 0
@@ -132,6 +132,8 @@ func run() error {
 		assignments = append(assignments, []string{t.ID, t.Workload, t.Size, vms[minIdx].Name})
 	}
 
+	execTimeMs := float64(time.Since(start).Nanoseconds()) / 1e6
+
 	if err := writeAllocation(allocPath, assignments); err != nil {
 		return fmt.Errorf("failed to write allocation: %v", err)
 	}
@@ -142,8 +144,6 @@ func run() error {
 			predictedMakespan = vm.TotalTime
 		}
 	}
-
-	execTimeMs := float64(time.Since(start).Nanoseconds()) / 1e6
 
 	if exportPath != "" {
 		f, err := os.OpenFile(exportPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
