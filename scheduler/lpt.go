@@ -1,4 +1,3 @@
-cat << 'EOF' > scheduler/lpt.go
 package main
 
 import (
@@ -66,7 +65,6 @@ func run() error {
 	args := os.Args[1:]
 	exportPath := ""
 
-	// 1. Parse optional export flag
 	if len(args) >= 2 && args[0] == "--export" {
 		exportPath = args[1]
 		args = args[2:]
@@ -77,7 +75,6 @@ func run() error {
 	}
 	tasksPath, machinesPath, allocPath := args[0], args[1], args[2]
 
-	// 2. Read profiled tasks and find est_runtime_s column
 	taskRecords, err := readCSVRaw(tasksPath)
 	if err != nil || len(taskRecords) < 2 {
 		return fmt.Errorf("error reading tasks: %v", err)
@@ -103,12 +100,10 @@ func run() error {
 		tasks = append(tasks, t)
 	}
 
-	// 3. Sort tasks descending by estimated runtime (LPT heuristic)
 	sort.Slice(tasks, func(i, j int) bool {
 		return tasks[i].EstTime > tasks[j].EstTime
 	})
 
-	// 4. Read machines
 	machineRecords, err := readCSVRaw(machinesPath)
 	if err != nil || len(machineRecords) < 2 {
 		return fmt.Errorf("error reading machines: %v", err)
@@ -125,7 +120,6 @@ func run() error {
 		return fmt.Errorf("no VMs found")
 	}
 
-	// 5. Greedy least-loaded assignment
 	var assignments [][]string
 	for _, t := range tasks {
 		minIdx := 0
@@ -138,12 +132,10 @@ func run() error {
 		assignments = append(assignments, []string{t.ID, t.Workload, t.Size, vms[minIdx].Name})
 	}
 
-	// 6. Write standard allocation output for the orchestrator
 	if err := writeAllocation(allocPath, assignments); err != nil {
 		return fmt.Errorf("failed to write allocation: %v", err)
 	}
 
-	// 7. Calculate makespan and export metrics if requested
 	predictedMakespan := 0.0
 	for _, vm := range vms {
 		if vm.TotalTime > predictedMakespan {
@@ -151,14 +143,14 @@ func run() error {
 		}
 	}
 
-	execTimeMs := time.Since(start).Milliseconds()
+	execTimeMs := float64(time.Since(start).Nanoseconds()) / 1e6
 
 	if exportPath != "" {
 		f, err := os.OpenFile(exportPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err == nil {
 			writer := csv.NewWriter(f)
 			fi, _ := f.Stat()
-			if fi.Size() == 0 { // Write header if file is empty
+			if fi.Size() == 0 { 
 				writer.Write([]string{"algorithm", "dataset", "run", "scheduler_time_ms", "predicted_makespan_s", "actual_makespan_s", "vm1_s", "vm2_s", "vm3_s"})
 			}
 			vm1, vm2, vm3 := 0.0, 0.0, 0.0
@@ -170,9 +162,9 @@ func run() error {
 				"LPT",
 				filepath.Base(tasksPath),
 				"1",
-				fmt.Sprintf("%d", execTimeMs),
+				fmt.Sprintf("%.3f", execTimeMs),
 				fmt.Sprintf("%.4f", predictedMakespan),
-				"", // actual_makespan_s filled in later by the pipeline
+				"", 
 				fmt.Sprintf("%.4f", vm1),
 				fmt.Sprintf("%.4f", vm2),
 				fmt.Sprintf("%.4f", vm3),
@@ -192,4 +184,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-EOF
