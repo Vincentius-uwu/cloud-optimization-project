@@ -1,3 +1,15 @@
 bin/
 results/*.out
 results/*.err
+
+#Generated profiled tasks, estimates, and allocations
+data/*_profiled.csv
+data/tasks_estimated.csv
+data/allocation_*.csv
+
+#orchestrator raw logs and temporary test outputs
+results/*.out
+results/*.err
+results/.last_run.csv
+results/test*.csv
+__pycache__/
