@@ -30,7 +30,7 @@ python3 scripts/estimate_tasks.py \
 
 # 2. pick scheduler and build allocation
 ALGO="exact"
-# if [ "$NUM_TASKS" -gt 10 ]; then ALGO="lpt"; fi
+if [ "$NUM_TASKS" -gt 15 ]; then ALGO="lpt"; fi
 SCHEDULER_BIN="./bin/${ALGO}_scheduler"
 SCHEDULER_SRC="scheduler/${ALGO}.go"
 ALLOC_CSV="data/allocation_${BASE_NAME}_${ALGO}.csv"
