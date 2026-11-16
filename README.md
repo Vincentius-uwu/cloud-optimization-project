@@ -1,4 +1,4 @@
-# Cloud Optimization Project
+# cloud-optimization-project
 
 Distributed task scheduling and optimization on **Google Cloud Platform (GCP)** — comparing Round-Robin, constructive heuristics, and exact Branch-and-Bound scheduling.
 
