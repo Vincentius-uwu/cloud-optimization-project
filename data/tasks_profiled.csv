@@ -1,0 +1,7 @@
+task_id,workload,size,est_runtime_s
+T1,cpu_task,500000,2.5
+T2,cpu_task,1000000,5.0
+T3,memory_task,256,1.2
+T4,matrix_task,400,3.4
+T5,memory_task,512,2.8
+T6,matrix_task,600,6.1
